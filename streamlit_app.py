@@ -15,12 +15,13 @@ from sklearn.preprocessing import OneHotEncoder, StandardScaler
 RANDOM_STATE = 42
 
 
-st.set_page_config(page_title="Prediksi Penjualan Toko Buku", layout="wide")
-st.title("Prediksi Penjualan Toko Buku")
+st.set_page_config(page_title="Prediksi Penjualan Buku (Kaggle Dataset)", layout="wide")
+st.title("📊 Prediksi Penjualan Buku & Analisis Regresi")
 
 
 def normalize_columns(data: pd.DataFrame) -> pd.DataFrame:
     data = data.copy()
+    # Membersihkan spasi di awal/akhir nama kolom (misal: 'Publisher ' menjadi 'Publisher')
     data.columns = [str(col).strip() for col in data.columns]
     return data
 
@@ -34,13 +35,13 @@ def prepare_data(data: pd.DataFrame, target_col: str, selected_features: list[st
 
     for col in selected_features:
         lowered = col.lower()
-        if "tanggal" in lowered or "date" in lowered:
+        # Deteksi jika ada fitur berbasis tahun atau tanggal
+        if "tanggal" in lowered or "date" in lowered or "year" in lowered:
             parsed = pd.to_datetime(work[col], errors="coerce")
             if parsed.notna().sum() > 0:
                 work[f"{col}_year"] = parsed.dt.year
                 work[f"{col}_month"] = parsed.dt.month
                 work[f"{col}_day"] = parsed.dt.day
-                work[f"{col}_dayofweek"] = parsed.dt.dayofweek
                 date_cols.append(col)
 
     work = work.drop(columns=date_cols)
@@ -80,11 +81,11 @@ def get_models():
         "Linear Regression": LinearRegression(),
         "Ridge Regression": Ridge(alpha=1.0),
         "Random Forest": RandomForestRegressor(
-            n_estimators=300, random_state=RANDOM_STATE, n_jobs=-1
+            n_estimators=100, random_state=RANDOM_STATE, n_jobs=-1
         ),
         "Gradient Boosting": GradientBoostingRegressor(random_state=RANDOM_STATE),
         "Extra Trees": ExtraTreesRegressor(
-            n_estimators=300, random_state=RANDOM_STATE, n_jobs=-1
+            n_estimators=100, random_state=RANDOM_STATE, n_jobs=-1
         ),
     }
 
@@ -94,15 +95,13 @@ def train_and_compare(data: pd.DataFrame, target_col: str, selected_features: li
     X, y = prepare_data(data, target_col, selected_features)
 
     if len(X) < 10:
-        raise ValueError("Data terlalu sedikit untuk training dan testing.")
+        raise ValueError("Data terlalu sedikit untuk training.")
 
     X_train, X_test, y_train, y_test = train_test_split(
         X, y, test_size=0.2, random_state=RANDOM_STATE
     )
 
-    # Buat preprocessor tetap/konsisten berdasarkan X_train secara keseluruhan
     preprocessor = build_preprocessor(X_train)
-
     results = []
     trained_models = {}
 
@@ -133,7 +132,6 @@ def train_and_compare(data: pd.DataFrame, target_col: str, selected_features: li
     results_df = pd.DataFrame(results).sort_values("R2", ascending=False)
     best_name = results_df.iloc[0]["Metode"]
     
-    # Simpan urutan kolom X yang asli untuk validasi input prediksi nanti
     return results_df, trained_models[best_name], best_name, list(X.columns)
 
 
@@ -157,7 +155,7 @@ def build_prediction_input(data: pd.DataFrame, selected_features: list[str]) -> 
             else:
                 options = sorted(series.dropna().astype(str).unique().tolist())
                 if options:
-                    values[feature] = st.selectbox(feature, options)
+                    values[feature] = st.selectbox(feature, options[:100]) # Batasi max 100 opsi drop-down
                 else:
                     values[feature] = st.text_input(feature)
 
@@ -165,36 +163,39 @@ def build_prediction_input(data: pd.DataFrame, selected_features: list[str]) -> 
     return row
 
 
-uploaded_file = st.file_uploader("Upload file CSV penjualan", type=["csv"])
+# --- Alur Aplikasi Streamlit ---
+uploaded_file = st.file_uploader("Upload file CSV (Gunakan 'Books_Data_Clean.csv')", type=["csv"])
 
 if uploaded_file is None:
-    st.info("Upload file CSV untuk mulai training dan prediksi.")
+    st.info("Silakan unggah file CSV data penjualan buku Anda untuk memulai.")
     st.stop()
 
 df = normalize_columns(pd.read_csv(uploaded_file))
 
-st.subheader("Preview Data")
-st.dataframe(df.head(20), use_container_width=True)
+st.subheader("Preview Dataset")
+st.dataframe(df.head(10), use_container_width=True)
 
+# Set default target ke 'gross sales' jika ada di dataset baru
 numeric_columns = df.select_dtypes(include=["number"]).columns.tolist()
-default_target = "total" if "total" in df.columns else (numeric_columns[-1] if numeric_columns else df.columns[-1])
+default_target = "gross sales" if "gross sales" in df.columns else (numeric_columns[-1] if numeric_columns else df.columns[-1])
 
 left, right = st.columns([1, 2])
 with left:
     target_col = st.selectbox(
-        "Kolom target yang ingin diprediksi",
+        "Pilih Target Prediksi",
         df.columns.tolist(),
-        index=df.columns.tolist().index(default_target),
+        index=df.columns.tolist().index(default_target) if default_target in df.columns.tolist() else 0,
     )
 
 with right:
     available_features = [col for col in df.columns if col != target_col]
-    default_features = [col for col in ["jenis_item", "jumlah", "tanggal pembelian"] if col in available_features]
+    # Set default fitur pintar otomatis untuk dataset baru ini
+    default_features = [col for col in ["units sold", "sale price", "Author_Rating", "genre"] if col in available_features]
     if not default_features:
-        default_features = available_features[: min(3, len(available_features))]
+        default_features = available_features[:3]
 
     selected_features = st.multiselect(
-        "Kolom fitur yang dipakai model",
+        "Pilih Fitur untuk Model",
         available_features,
         default=default_features,
     )
@@ -204,7 +205,7 @@ if not selected_features:
     st.stop()
 
 if st.button("Latih dan Bandingkan Model", type="primary"):
-    with st.spinner("Melatih beberapa metode dan menghitung skor..."):
+    with st.spinner("Sedang melatih model..."):
         try:
             results_df, best_model, best_name, final_columns = train_and_compare(
                 df, target_col, selected_features
@@ -227,41 +228,36 @@ best_name = st.session_state["best_name"]
 selected_features = st.session_state["selected_features"]
 final_columns = st.session_state["final_columns"]
 
-st.subheader("Perbandingan Metode")
+st.subheader("📊 Hasil Evaluasi & Perbandingan Model")
 st.dataframe(
     results_df.style.format(
-        {"R2": "{:.4f}", "MAE": "{:,.0f}", "RMSE": "{:,.0f}", "MAPE (%)": "{:.2f}"}
+        {"R2": "{:.4f}", "MAE": "{:,.2f}", "RMSE": "{:,.2f}", "MAPE (%)": "{:.2f}"}
     ),
     use_container_width=True,
 )
 
 best_r2 = results_df.iloc[0]["R2"]
-st.success(f"Model terbaik: {best_name} dengan R2 = {best_r2:.4f}. Semakin dekat R2 ke 1, semakin baik.")
+st.success(f"🏆 Model Terbaik: **{best_name}** dengan R² = **{best_r2:.6f}**")
 st.bar_chart(results_df.set_index("Metode")["R2"])
 
-st.subheader("Prediksi Penjualan")
+st.subheader("🔮 Form Prediksi Data Baru")
 input_df = build_prediction_input(df, selected_features)
 
-if st.button("Prediksi"):
-    # Penanganan logika ekstraksi tanggal untuk data input baru yang diprediksi
+if st.button("Hitung Prediksi"):
     prepared_input = input_df.copy()
     date_cols = []
     
     for col in selected_features:
         lowered = col.lower()
-        if "tanggal" in lowered or "date" in lowered:
+        if "tanggal" in lowered or "date" in lowered or "year" in lowered:
             parsed = pd.to_datetime(prepared_input[col], errors="coerce")
             prepared_input[f"{col}_year"] = parsed.dt.year
             prepared_input[f"{col}_month"] = parsed.dt.month
             prepared_input[f"{col}_day"] = parsed.dt.day
-            prepared_input[f"{col}_dayofweek"] = parsed.dt.dayofweek
             date_cols.append(col)
             
-    prepared_input = prepared_input.drop(columns=date_cols)
-    
-    # Memastikan urutan kolom input prediksi 100% sama dengan kolom X saat ditraining
+    prepared_input = prepared_input.drop(columns=date_cols, errors='ignore')
     prepared_input = prepared_input[final_columns]
     
-    # Eksekusi Prediksi
     prediction = best_model.predict(prepared_input)[0]
-    st.metric("Hasil Prediksi", f"{prediction:,.0f}")
+    st.metric(label=f"Hasil Estimasi {target_col}", value=f"{prediction:,.2f}")
