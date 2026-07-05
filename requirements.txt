@@ -1,4 +1,6 @@
-streamlit
-pandas
 numpy
+pandas
 scikit-learn
+streamlit
+matplotlib
+seaborn
