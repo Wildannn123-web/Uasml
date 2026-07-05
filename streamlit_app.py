@@ -100,13 +100,16 @@ def train_and_compare(data: pd.DataFrame, target_col: str, selected_features: li
         X, y, test_size=0.2, random_state=RANDOM_STATE
     )
 
+    # Buat preprocessor tetap/konsisten berdasarkan X_train secara keseluruhan
+    preprocessor = build_preprocessor(X_train)
+
     results = []
     trained_models = {}
 
     for name, model in get_models().items():
         pipeline = Pipeline(
             [
-                ("preprocess", build_preprocessor(X_train)),
+                ("preprocess", preprocessor),
                 ("model", model),
             ]
         )
@@ -129,6 +132,8 @@ def train_and_compare(data: pd.DataFrame, target_col: str, selected_features: li
 
     results_df = pd.DataFrame(results).sort_values("R2", ascending=False)
     best_name = results_df.iloc[0]["Metode"]
+    
+    # Simpan urutan kolom X yang asli untuk validasi input prediksi nanti
     return results_df, trained_models[best_name], best_name, list(X.columns)
 
 
@@ -157,9 +162,6 @@ def build_prediction_input(data: pd.DataFrame, selected_features: list[str]) -> 
                     values[feature] = st.text_input(feature)
 
     row = pd.DataFrame([values])
-    for col in row.columns:
-        if "tanggal" in col.lower() or "date" in col.lower():
-            row[col] = pd.to_datetime(row[col]).astype(str)
     return row
 
 
@@ -223,6 +225,7 @@ results_df = st.session_state["results_df"]
 best_model = st.session_state["best_model"]
 best_name = st.session_state["best_name"]
 selected_features = st.session_state["selected_features"]
+final_columns = st.session_state["final_columns"]
 
 st.subheader("Perbandingan Metode")
 st.dataframe(
@@ -240,10 +243,25 @@ st.subheader("Prediksi Penjualan")
 input_df = build_prediction_input(df, selected_features)
 
 if st.button("Prediksi"):
-    prepared_input, _ = prepare_data(
-        pd.concat([input_df.assign(**{target_col: 0}), df[selected_features + [target_col]].head(1)], ignore_index=True).head(1),
-        target_col,
-        selected_features,
-    )
+    # Penanganan logika ekstraksi tanggal untuk data input baru yang diprediksi
+    prepared_input = input_df.copy()
+    date_cols = []
+    
+    for col in selected_features:
+        lowered = col.lower()
+        if "tanggal" in lowered or "date" in lowered:
+            parsed = pd.to_datetime(prepared_input[col], errors="coerce")
+            prepared_input[f"{col}_year"] = parsed.dt.year
+            prepared_input[f"{col}_month"] = parsed.dt.month
+            prepared_input[f"{col}_day"] = parsed.dt.day
+            prepared_input[f"{col}_dayofweek"] = parsed.dt.dayofweek
+            date_cols.append(col)
+            
+    prepared_input = prepared_input.drop(columns=date_cols)
+    
+    # Memastikan urutan kolom input prediksi 100% sama dengan kolom X saat ditraining
+    prepared_input = prepared_input[final_columns]
+    
+    # Eksekusi Prediksi
     prediction = best_model.predict(prepared_input)[0]
     st.metric("Hasil Prediksi", f"{prediction:,.0f}")
