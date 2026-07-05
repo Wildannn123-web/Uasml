@@ -285,19 +285,20 @@ with st.sidebar:
     categorical_available = summary_df.loc[summary_df["Tipe"] == "Kategori", "Kolom"].tolist()
     date_available = summary_df.loc[summary_df["Tipe"] == "Tanggal", "Kolom"].tolist()
 
+    MAX_FEATURES = 5
+
+    def add_features_capped(new_cols: list[str]):
+        current = st.session_state.get("feature_picker", [])
+        merged = list(dict.fromkeys(current + new_cols))  # union, urutan terjaga
+        st.session_state["feature_picker"] = merged[:MAX_FEATURES]
+
     quick_col1, quick_col2, quick_col3 = st.columns(3)
     if quick_col1.button("➕ Semua Angka", use_container_width=True):
-        st.session_state["feature_picker"] = list(
-            set(st.session_state.get("feature_picker", []) + numeric_available)
-        )
+        add_features_capped(numeric_available)
     if quick_col2.button("➕ Semua Kategori", use_container_width=True):
-        st.session_state["feature_picker"] = list(
-            set(st.session_state.get("feature_picker", []) + categorical_available)
-        )
+        add_features_capped(categorical_available)
     if quick_col3.button("➕ Semua Tanggal", use_container_width=True):
-        st.session_state["feature_picker"] = list(
-            set(st.session_state.get("feature_picker", []) + date_available)
-        )
+        add_features_capped(date_available)
 
     if "feature_picker" not in st.session_state:
         default_features = [
@@ -305,20 +306,37 @@ with st.sidebar:
         ]
         if not default_features:
             default_features = available_features[: min(3, len(available_features))]
-        st.session_state["feature_picker"] = default_features
+        st.session_state["feature_picker"] = default_features[:MAX_FEATURES]
+
+    st.caption(f"Maksimal **{MAX_FEATURES} kolom** fitur boleh dipilih.")
 
     selected_features = st.multiselect(
-        "Fitur yang dipakai model",
+        "Fitur yang dipakai model (maks. 5)",
         available_features,
         key="feature_picker",
-        help="Pilih kolom-kolom yang menurutmu ikut menentukan besar-kecilnya penjualan, "
+        help="Pilih maksimal 5 kolom yang menurutmu ikut menentukan besar-kecilnya penjualan, "
         "misalnya jenis produk, jumlah stok, harga, hari/tanggal transaksi, dll.",
     )
 
-    train_clicked = st.button("🚀 Latih dan Bandingkan Model", type="primary", use_container_width=True)
+    if len(selected_features) > MAX_FEATURES:
+        st.error(
+            f"Kamu memilih {len(selected_features)} kolom. "
+            f"Hapus salah satu supaya jumlahnya maksimal {MAX_FEATURES}."
+        )
+
+    train_clicked = st.button(
+        "🚀 Latih dan Bandingkan Model",
+        type="primary",
+        use_container_width=True,
+        disabled=len(selected_features) == 0 or len(selected_features) > MAX_FEATURES,
+    )
 
 if not selected_features:
     st.warning("Pilih minimal satu kolom fitur di sidebar sebelah kiri.")
+    st.stop()
+
+if len(selected_features) > MAX_FEATURES:
+    st.warning(f"Pilih maksimal {MAX_FEATURES} kolom fitur di sidebar sebelah kiri.")
     st.stop()
 
 if train_clicked:
