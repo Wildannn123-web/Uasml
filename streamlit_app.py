@@ -44,6 +44,19 @@ def normalize_columns(data: pd.DataFrame) -> pd.DataFrame:
     return data
 
 
+CUSTOMER_ID_KEYWORDS = ["nama customer", "nama pelanggan", "customer name", "nama_customer", "nama_pelanggan"]
+
+
+def is_customer_identity_column(col: str) -> bool:
+    """Deteksi kolom berisi nama/identitas customer, yang tidak relevan sebagai fitur prediksi."""
+    lowered = col.lower().strip()
+    if lowered in CUSTOMER_ID_KEYWORDS:
+        return True
+    has_nama = "nama" in lowered
+    has_person_ref = "customer" in lowered or "pelanggan" in lowered
+    return has_nama and has_person_ref
+
+
 def prepare_data(data: pd.DataFrame, target_col: str, selected_features: list[str]):
     data = normalize_columns(data)
     data = data.dropna(subset=[target_col])
@@ -265,7 +278,15 @@ with tab_data:
         )
 
     with col2:
-        available_features = [col for col in df.columns if col != target_col]
+        available_features = [
+            col for col in df.columns
+            if col != target_col and not is_customer_identity_column(col)
+        ]
+        excluded_customer_cols = [
+            col for col in df.columns
+            if col != target_col and is_customer_identity_column(col)
+        ]
+
         default_features = [col for col in ["jenis_item", "jumlah", "tanggal pembelian"] if col in available_features]
         if not default_features:
             default_features = available_features[: min(3, len(available_features))]
@@ -275,6 +296,12 @@ with tab_data:
             available_features,
             default=default_features,
         )
+
+        if excluded_customer_cols:
+            st.caption(
+                f"ℹ️ Kolom {', '.join(excluded_customer_cols)} disembunyikan dari pilihan fitur "
+                "karena berisi nama/identitas customer, bukan pola penjualan yang berguna untuk prediksi."
+            )
 
     st.session_state["target_col"] = target_col
     st.session_state["selected_features"] = selected_features
